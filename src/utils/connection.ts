@@ -94,61 +94,68 @@ export async function createSalesforceConnection(config?: ConnectionConfig) {
       }
       
       console.error('Connecting to Salesforce using OAuth 2.0 Client Credentials Flow');
-      
-      // Get the instance URL from environment variable or config
-      const instanceUrl = loginUrl;
-      
-      // Create the token URL
-      const tokenUrl = new URL('/services/oauth2/token', instanceUrl);
-      
-      // Prepare the request body
-      const requestBody = querystring.stringify({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret
-      });
-      
-      // Make the token request
-      const tokenResponse = await new Promise<any>((resolve, reject) => {
-        const req = https.request({
-          method: 'POST',
-          hostname: tokenUrl.hostname,
-          path: tokenUrl.pathname,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(requestBody)
-          }
-        }, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            try {
-              const parsedData = JSON.parse(data);
-              if (res.statusCode !== 200) {
-                reject(new Error(`OAuth token request failed: ${parsedData.error} - ${parsedData.error_description}`));
-              } else {
-                resolve(parsedData);
-              }
-            } catch (e: unknown) {
-              reject(new Error(`Failed to parse OAuth response: ${e instanceof Error ? e.message : String(e)}`));
+
+      let instanceUrl = process.env.SALESFORCE_INSTANCE_URL;
+      let accessToken = process.env.SALESFORCE_ACCESS_TOKEN;
+
+      if (!accessToken) {
+        
+        // Create the token URL
+        const tokenUrl = new URL('/services/oauth2/token', loginUrl);
+        
+        // Prepare the request body
+        const requestBody = querystring.stringify({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret
+        });
+        
+        // Make the token request
+        const tokenResponse = await new Promise<any>((resolve, reject) => {
+          const req = https.request({
+            method: 'POST',
+            hostname: tokenUrl.hostname,
+            path: tokenUrl.pathname,
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(requestBody)
             }
+          }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+              data += chunk;
+            });
+            res.on('end', () => {
+              try {
+                const parsedData = JSON.parse(data);
+                if (res.statusCode !== 200) {
+                  reject(new Error(`OAuth token request failed: ${parsedData.error} - ${parsedData.error_description}`));
+                } else {
+                  resolve(parsedData);
+                }
+              } catch (e: unknown) {
+                reject(new Error(`Failed to parse OAuth response: ${e instanceof Error ? e.message : String(e)}`));
+              }
+            });
           });
+          
+          req.on('error', (e) => {
+            reject(new Error(`OAuth request error: ${e.message}`));
+          });
+          
+          req.write(requestBody);
+          req.end();
         });
-        
-        req.on('error', (e) => {
-          reject(new Error(`OAuth request error: ${e.message}`));
-        });
-        
-        req.write(requestBody);
-        req.end();
-      });
+
+        instanceUrl = tokenResponse.instance_url;
+        accessToken = tokenResponse.access_token;
+
+      }
       
       // Create connection with the access token
       const conn = new jsforce.Connection({
-        instanceUrl: tokenResponse.instance_url,
-        accessToken: tokenResponse.access_token
+        instanceUrl: instanceUrl,
+        accessToken: accessToken
       });
       
       return conn;
